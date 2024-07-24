@@ -1,0 +1,20 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint", "prettier"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/eslint-recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "rules": {
+    "no-console": 1,
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/explicit-module-boundary-types": 0,
+    "semi": [2, "never"],
+    "quotes": [2, "single", "avoid-escape"],
+    "prettier/prettier": "error",
+    "eqeqeq": 0,
+    "no-useless-catch": 0
+  }
+}

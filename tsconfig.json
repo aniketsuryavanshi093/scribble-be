@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "es2016" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */,
+    "experimentalDecorators": true /* Enable experimental support for TC39 stage 2 draft decorators. */,
+    "emitDecoratorMetadata": true /* Emit design-type metadata for decorated declarations in source files. */,
+
+    /* Modules */
+    "module": "commonjs" /* Specify what module code is generated. */,
+    "moduleResolution": "node" /* Specify how TypeScript looks up a file from a given module specifier. */,
+    "baseUrl": "." /* Specify the base directory to resolve non-relative module names. */,
+    "paths": {
+      "@members/*": ["src/components/members/*"],
+      "@organization/*": ["src/components/organization/*"],
+      "@projects/*": ["src/components/projects/*"],
+      "@auth/*": ["src/components/auth/*"],
+      "@dummy/*": ["src/components/dummy/*"],
+      "@notification/*": ["src/components/notification/*"],
+
+      "@config/*": ["src/config/*"],
+      "@connections/*": ["src/connections/*"],
+      "@helpers/*": ["src/helpers/*"],
+      "@middlewares/*": ["src/middlewares/*"],
+      "@interfaces/*": ["src/interfaces/*"],
+      "@utils/*": ["src/utils/*"],
+      "@consumer/*": ["src/consumer/*"],
+      "@cron/*": ["src/cron/*"]
+    },
+    "typeRoots": [
+      "./@types",
+      "./node_modules/@types"
+    ] /* Specify multiple folders that act like './node_modules/@types'. */,
+    "outDir": "build/src" /* Specify an output folder for all emitted files. */,
+    "allowSyntheticDefaultImports": true /* Allow 'import x from y' when a module doesn't have a default export. */,
+    "esModuleInterop": true /* Emit additional JavaScript to ease support for importing CommonJS modules. This enables 'allowSyntheticDefaultImports' for type compatibility. */,
+    /* Type Checking */
+    "strict": true /* Enable all strict type-checking options. */,
+    "noImplicitAny": false /* Enable error reporting for expressions and declarations with an implied 'any' type. */,
+    "skipLibCheck": true /* Skip type checking all .d.ts files. */
+  },
+  "include": ["src/**/*.ts", "./@types/*.d.ts", "src/app.ts"],
+  "exclude": ["node_modules", "build"],
+  "ts-node": {
+    "swc": false
+  }
+}
