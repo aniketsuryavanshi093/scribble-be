@@ -6,11 +6,57 @@ import http from 'http'
 import cors from 'cors'
 import { z } from 'zod'
 
-import type { DrawOptions, JoinRoomData } from '@/types'
+import type { DrawOptions, JoinRoomData, User } from '@/types'
 import { joinRoomSchema } from '@/lib/validations/joinRoom'
-import { addUser, getRoomMembers, getUser, removeUser } from '@/data/users'
+// import { addUser, getRoomMembers, getUser, removeUser } from '@/data/users'
 import { addUndoPoint, getLastUndoPoint, deleteLastUndoPoint } from '@/data/undoPoints'
 
+const rooms: Record<string, User[]> = {}
+const getUser = (userId: string, roomId?: string) => {
+  if (roomId) {
+    const roomMembers = rooms[roomId!]
+    if (!roomMembers) return null
+    return roomMembers.find(user => user.id === userId)
+  } else {
+    for (const element of Object.values(rooms)) {
+      const user = element.find(user => user.id === userId)
+      if (user) {
+        return user
+      }
+    }
+    return null
+  }
+}
+
+// const getRoomMembers = (roomId: string) =>
+//   users
+//     .filter(user => user.roomId === roomId)
+//     .map(({ id, username }) => ({ id, username }))
+
+const getRoomMembers = (roomId: string) => {
+  console.log(rooms)
+  const roomMembers = rooms[roomId]
+  if (!roomMembers) return []
+  return roomMembers
+}
+// users
+//   .filter(user => user.roomId === roomId)
+//   .map(({ id, username }) => ({ id, username }))
+
+// const addUser = (user: User) => users.push(user)
+const addUser = (user: User, roomId: string) => {
+  console.log(user)
+  if (!rooms[roomId]) return (rooms[roomId] = [user])
+  rooms[roomId].push(user)
+}
+
+const removeUser = (userId: string, roomId?: string) => {
+  if (roomId) {
+    // users = users.filter(user => user.id !== userId)
+    if (!rooms[roomId]) return
+    rooms[roomId] = rooms[roomId].filter(user => user.id !== userId)
+  }
+}
 const app = express()
 
 app.use(cors())
@@ -36,15 +82,22 @@ function validateJoinRoomData(socket: Socket, joinRoomData: JoinRoomData) {
   }
 }
 
-function joinRoom(socket: Socket, roomId: string, username: string) {
+function joinRoom(
+  socket: Socket,
+  roomId: string,
+  username: string,
+  Avatar: User['Avatar']
+) {
   socket.join(roomId)
   const user = {
     id: socket.id,
     username,
+    Avatar,
+    roomId,
   }
-  addUser({ ...user, roomId }, roomId)
-  const members = getRoomMembers(roomId)
 
+  addUser(user, roomId)
+  const members = getRoomMembers(roomId)
   socket.emit('room-joined', { user, roomId, members })
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
@@ -74,8 +127,7 @@ io.on('connection', socket => {
 
     if (!validatedData) return
     const { roomId, username } = validatedData
-
-    joinRoom(socket, roomId, username)
+    joinRoom(socket, roomId, username, joinRoomData.Avatar)
   })
 
   socket.on('join-room', (joinRoomData: JoinRoomData) => {
@@ -85,7 +137,7 @@ io.on('connection', socket => {
     const { roomId, username } = validatedData
 
     if (isRoomCreated(roomId)) {
-      return joinRoom(socket, roomId, username)
+      return joinRoom(socket, roomId, username, joinRoomData.Avatar)
     }
 
     socket.emit('room-not-found', {
