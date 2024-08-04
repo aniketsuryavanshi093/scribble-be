@@ -6,20 +6,19 @@ import http from 'http'
 import cors from 'cors'
 import { z } from 'zod'
 
-import type { DrawOptions, JoinRoomData, User } from '@/types'
+import type { DrawOptions, GameStateType, JoinRoomData, Scoretype, User } from '@/types'
 import { joinRoomSchema } from '@/lib/validations/joinRoom'
-// import { addUser, getRoomMembers, getUser, removeUser } from '@/data/users'
 import { addUndoPoint, getLastUndoPoint, deleteLastUndoPoint } from '@/data/undoPoints'
 
-const rooms: Record<string, User[]> = {}
+const rooms: Record<string, { user: User[]; gameState: GameStateType }> = {}
 const getUser = (userId: string, roomId?: string) => {
   if (roomId) {
     const roomMembers = rooms[roomId!]
     if (!roomMembers) return null
-    return roomMembers.find(user => user.id === userId)
+    return roomMembers.user.find(user => user.id === userId)
   } else {
     for (const element of Object.values(rooms)) {
-      const user = element.find(user => user.id === userId)
+      const user = element.user.find(user => user.id === userId)
       if (user) {
         return user
       }
@@ -27,32 +26,33 @@ const getUser = (userId: string, roomId?: string) => {
     return null
   }
 }
-
-// const getRoomMembers = (roomId: string) =>
-//   users
-//     .filter(user => user.roomId === roomId)
-//     .map(({ id, username }) => ({ id, username }))
-
 const getRoomMembers = (roomId: string) => {
-  const roomMembers = rooms[roomId]
+  const roomMembers = rooms[roomId]?.user
   if (!roomMembers) return []
   return roomMembers
 }
-// users
-//   .filter(user => user.roomId === roomId)
-//   .map(({ id, username }) => ({ id, username }))
-
-// const addUser = (user: User) => users.push(user)
 const addUser = (user: User, roomId: string) => {
-  if (!rooms[roomId]) return (rooms[roomId] = [user])
-  rooms[roomId].push(user)
+  if (!rooms[roomId])
+    return (rooms[roomId] = {
+      user: [user],
+      gameState: {
+        gameState: 'not-started',
+        drawer: '',
+        word: '',
+        score: {},
+        curentRound: 0,
+      },
+    })
+  rooms[roomId].user.push(user)
 }
 
 const removeUser = (userId: string, roomId?: string) => {
   if (roomId) {
-    // users = users.filter(user => user.id !== userId)
     if (!rooms[roomId]) return
-    rooms[roomId] = rooms[roomId].filter(user => user.id !== userId)
+    rooms[roomId] = {
+      ...rooms[roomId],
+      user: rooms[roomId].user.filter(user => user.id !== userId),
+    }
   }
 }
 const app = express()
@@ -97,6 +97,18 @@ function joinRoom(
   addUser(user, roomId)
   const members = getRoomMembers(roomId)
   socket.emit('room-joined', { user, roomId, members })
+  if (members.length === 3) {
+    rooms[roomId].gameState.gameState = 'started'
+    rooms[roomId].gameState.drawer = members[0].id
+    rooms[roomId].gameState.curentRound = 1
+    members.forEach(member => {
+      rooms[roomId].gameState.score[member.id] = {
+        score: 0,
+        worddrawoccurance: '',
+      }
+    })
+    io.to(roomId).emit('game-started', rooms[roomId].gameState)
+  }
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
     title: 'New member arrived!',
@@ -117,6 +129,10 @@ function leaveRoom(socket: Socket, RoomId?: string) {
     message: `${username} left the party.`,
   })
   socket.leave(roomId)
+}
+
+function getGameState(roomId: string) {
+  io.to(roomId).emit('recievegamestate', rooms[roomId].gameState)
 }
 
 io.on('connection', socket => {
@@ -193,6 +209,33 @@ io.on('connection', socket => {
       })
     }
   )
+  socket.on('selectword', ({ roomId, id, word }: any) => {
+    rooms[roomId].gameState.drawer = id
+    rooms[roomId].gameState.word = word
+    getGameState(roomId)
+    io.to(roomId).emit('wordselected')
+  })
+
+  socket.on(
+    'change-drawer',
+    ({ roomId, newdrawer }: { roomId: string; newdrawer: string }) => {
+      if (!rooms[roomId]) return
+      rooms[roomId].gameState.drawer = newdrawer
+      // io.to(roomId).emit('drawer-changed-fromserver', rooms[roomId].gameState)
+      getGameState(roomId)
+    }
+  )
+
+  socket.on(
+    'update-scorecard',
+    ({ roomId, score }: { roomId: string; score: Scoretype }) => {
+      if (!rooms[roomId]) return
+      rooms[roomId].gameState.score = score
+      // io.to(roomId).emit('updatedscorecard-fromserver', rooms[roomId].gameState)
+      getGameState(roomId)
+    }
+  )
+
   socket.on('clear-canvas', (roomId: string) => {
     socket.to(roomId).emit('clear-canvas')
   })
