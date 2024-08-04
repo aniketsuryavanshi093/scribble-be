@@ -34,7 +34,6 @@ const getUser = (userId: string, roomId?: string) => {
 //     .map(({ id, username }) => ({ id, username }))
 
 const getRoomMembers = (roomId: string) => {
-  console.log(rooms)
   const roomMembers = rooms[roomId]
   if (!roomMembers) return []
   return roomMembers
@@ -45,7 +44,6 @@ const getRoomMembers = (roomId: string) => {
 
 // const addUser = (user: User) => users.push(user)
 const addUser = (user: User, roomId: string) => {
-  console.log(user)
   if (!rooms[roomId]) return (rooms[roomId] = [user])
   rooms[roomId].push(user)
 }
@@ -175,7 +173,26 @@ io.on('connection', socket => {
       socket.to(roomId).emit('update-canvas-state', drawOptions)
     }
   )
-
+  socket.on(
+    'broadcast-mesage',
+    ({
+      roomId,
+      message,
+      username,
+      userid,
+    }: {
+      roomId: string
+      message: string
+      userid: string
+      username: string
+    }) => {
+      io.to(roomId).emit('recieve-broadcasted-message', {
+        message,
+        userid,
+        username,
+      })
+    }
+  )
   socket.on('clear-canvas', (roomId: string) => {
     socket.to(roomId).emit('clear-canvas')
   })
