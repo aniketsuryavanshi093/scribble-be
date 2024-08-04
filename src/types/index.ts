@@ -22,7 +22,21 @@ export interface User {
   username: string
   roomId: string
 }
+export interface GameStateType {
+  gameState: 'started' | 'not-started'
+  drawer: string
+  word: string
+  score: Scoretype
+  curentRound: number
+}
 
+export type Scoretype = Record<
+  string,
+  {
+    score: number
+    worddrawoccurance: string
+  }
+>
 export interface Point {
   x: number
   y: number
