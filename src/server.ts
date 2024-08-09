@@ -179,7 +179,10 @@ io.on('connection', socket => {
 
       if (!lastMember) return
 
-      socket.to(lastMember.id).emit('canvas-state-from-server', canvasState)
+      socket.to(lastMember.id).emit('canvas-state-from-server', {
+        canvasState,
+        gameState: rooms[roomId].gameState,
+      })
     }
   )
 
@@ -209,11 +212,19 @@ io.on('connection', socket => {
       })
     }
   )
-  socket.on('selectword', ({ roomId, id, word }: any) => {
+  socket.on('drawerchoosingword', ({ roomId, id }: any) => {
     rooms[roomId].gameState.drawer = id
-    rooms[roomId].gameState.word = word
+    rooms[roomId].gameState.gameState = 'choosing-word'
     getGameState(roomId)
-    io.to(roomId).emit('wordselected')
+  })
+  socket.on('selectword', ({ roomId, id, word }: any) => {
+    if (rooms[roomId]) {
+      rooms[roomId].gameState.drawer = id
+      rooms[roomId].gameState.gameState = 'started'
+      rooms[roomId].gameState.word = word
+      getGameState(roomId)
+      io.to(roomId).emit('wordselected', word)
+    }
   })
 
   socket.on(

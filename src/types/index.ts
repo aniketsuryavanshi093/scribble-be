@@ -23,7 +23,7 @@ export interface User {
   roomId: string
 }
 export interface GameStateType {
-  gameState: 'started' | 'not-started'
+  gameState: 'started' | 'not-started' | 'choosing-word'
   drawer: string
   word: string
   score: Scoretype
