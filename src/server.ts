@@ -213,6 +213,7 @@ io.on('connection', socket => {
     }
   )
   socket.on('drawerchoosingword', ({ roomId, id }: any) => {
+    if (!rooms[roomId]) return
     rooms[roomId].gameState.drawer = id
     rooms[roomId].gameState.gameState = 'choosing-word'
     getGameState(roomId)
@@ -220,7 +221,9 @@ io.on('connection', socket => {
   socket.on('selectword', ({ roomId, id, word }: any) => {
     if (rooms[roomId]) {
       rooms[roomId].gameState.drawer = id
-      rooms[roomId].gameState.gameState = 'started'
+      rooms[roomId].gameState.gameState = 'guessing-word'
+
+      rooms[roomId].gameState.lastGuesstime = Date.now() + 90000
       rooms[roomId].gameState.word = word
       getGameState(roomId)
       io.to(roomId).emit('wordselected', word)
@@ -237,15 +240,69 @@ io.on('connection', socket => {
     }
   )
 
-  socket.on(
-    'update-scorecard',
-    ({ roomId, score }: { roomId: string; score: Scoretype }) => {
-      if (!rooms[roomId]) return
-      rooms[roomId].gameState.score = score
-      // io.to(roomId).emit('updatedscorecard-fromserver', rooms[roomId].gameState)
+  // socket.on(
+  //   'update-scorecard',
+  //   ({ roomId, score }: { roomId: string; score: Scoretype }) => {
+  //     if (!rooms[roomId]) return
+  //     rooms[roomId].gameState.score = score
+  //     // io.to(roomId).emit('updatedscorecard-fromserver', rooms[roomId].gameState)
+  //     getGameState(roomId)
+  //   }
+  // )
+  const updateScore = (roomId: string) => {
+    const room = rooms[roomId]
+    if (!room) return
+
+    const { gameState } = room
+    const { guessedWordUserState, drawer } = gameState
+    const totalPlayers = Object.keys(guessedWordUserState || {}).length
+    let correctGuesses = 0
+
+    for (const [userId, guessState] of Object.entries(guessedWordUserState || {})) {
+      if (guessState.isGuessed) {
+        correctGuesses++
+        const guessTime = guessState.guessedTime
+        if (guessTime <= 30) {
+          gameState.score[userId].score += 175
+        } else if (guessTime <= 60) {
+          gameState.score[userId].score += 125
+        } else {
+          gameState.score[userId].score += 75
+        }
+      }
+    }
+
+    // Bonus for the drawer if more than 50% guessed correctly
+    if (correctGuesses / totalPlayers > 0.5) {
+      gameState.score[drawer].score += 100
+    }
+    console.log(gameState)
+
+    // Emit the updated scorecard to the room
+    // io.to(roomId).emit('updatedscorecard-fromserver', gameState)
+    getGameState(roomId)
+  }
+
+  // Usage in the 'update-scorecard' socket event
+  socket.on('update-scorecard', ({ roomId }: { roomId: string }) => {
+    if (!rooms[roomId]) return
+    // rooms[roomId].gameState.score = score
+    updateScore(roomId) // Call the function to update the scores
+  })
+
+  socket.on('guessed-word', ({ userId, roomId, guessedTime }: any) => {
+    if (!rooms[roomId]) return
+    if (rooms[roomId]) {
+      rooms[roomId].gameState.guessedWordUserState = {
+        ...rooms[roomId].gameState.guessedWordUserState,
+        [userId]: {
+          isGuessed: true,
+          guessedTime,
+        },
+      }
       getGameState(roomId)
     }
-  )
+  })
 
   socket.on('clear-canvas', (roomId: string) => {
     socket.to(roomId).emit('clear-canvas')
