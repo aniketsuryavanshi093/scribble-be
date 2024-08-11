@@ -23,9 +23,17 @@ export interface User {
   roomId: string
 }
 export interface GameStateType {
-  gameState: 'started' | 'not-started' | 'choosing-word'
+  gameState: 'started' | 'not-started' | 'choosing-word' | 'guessing-word'
   drawer: string
   word: string
+  lastGuesstime?: number
+  guessedWordUserState?: Record<
+    string,
+    {
+      isGuessed: boolean
+      guessedTime: number
+    }
+  > | null
   score: Scoretype
   curentRound: number
 }
