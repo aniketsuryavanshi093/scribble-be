@@ -23,7 +23,7 @@ export interface User {
   roomId: string
 }
 export interface GameStateType {
-  gameState: 'started' | 'not-started' | 'choosing-word' | 'guessing-word'
+  gameState: 'started' | 'not-started' | 'choosing-word' | 'guessing-word' | 'finished'
   drawer: string
   word: string
   lastGuesstime?: number
@@ -35,7 +35,10 @@ export interface GameStateType {
     }
   > | null
   score: Scoretype
-  curentRound: number
+  currentRound: number
+  drawings: Record<string, number> // Track how many times each user has drawn
+  totalRounds: number // Total number of rounds in the game
+  maxDrawingsPerRound: number // Max drawings per round per user
 }
 
 export type Scoretype = Record<
