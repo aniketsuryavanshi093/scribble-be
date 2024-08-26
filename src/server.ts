@@ -17,21 +17,23 @@ const initializeGame = (
   totalRounds: number,
   maxDrawingsPerRound: number
 ) => {
-  rooms[roomId].gameState = {
-    gameState: 'not-started',
-    drawer: '',
-    word: '',
-    score: {},
-    currentRound: 1,
-    drawings: {},
-    totalRounds,
-    maxDrawingsPerRound,
+  rooms[roomId] = {
+    user: [user],
+    gameState: {
+      gameState: 'not-started',
+      drawer: '',
+      word: '',
+      score: {},
+      currentRound: 1,
+      drawings: {},
+      totalRounds,
+      maxDrawingsPerRound,
+    },
   }
-
   // Initialize drawing counts
-  for (let userId in rooms[roomId].user) {
-    rooms[roomId].gameState.drawings[userId] = 0
-  }
+  // for (let userId in rooms[roomId].user) {
+  rooms[roomId].gameState.drawings[user?.id] = 1
+  // }
 }
 
 const getUser = (userId: string, roomId?: string) => {
@@ -56,8 +58,9 @@ const getRoomMembers = (roomId: string) => {
 }
 const addUser = (user: User, roomId: string) => {
   if (!rooms[roomId]) {
-    return initializeGame(user, roomId, 2, 2)
+    return initializeGame(user, roomId, 2, 1)
   }
+  rooms[roomId].gameState.drawings[user?.id] = 0
   rooms[roomId].user.push(user)
 }
 
@@ -230,47 +233,48 @@ io.on('connection', socket => {
   const selectNextDrawer = (roomId: string) => {
     const room = rooms[roomId]
     if (!room) return
-
+    room.gameState.guessedWordUserState = {}
     const { gameState } = room
     const { currentRound, drawings, totalRounds, maxDrawingsPerRound } = gameState
 
-    if (currentRound > totalRounds) {
-      // Game Over logic here
-      return
+    if (currentRound <= totalRounds) {
+      console.log('inside here ', currentRound, totalRounds)
+
+      const eligibleDrawers = Object.entries(drawings)
+        .filter(([userId, draws]) => draws < maxDrawingsPerRound)
+        .map(([userId]) => userId)
+
+      if (eligibleDrawers.length > 0) {
+        const randomIndex = Math.floor(Math.random() * eligibleDrawers.length)
+        gameState.drawer = eligibleDrawers[randomIndex]
+        drawings[gameState.drawer]++ // Increment draw count for the selected drawer
+      } else {
+        // If all users have drawn the max number of times in the current round, start a new round
+        gameState.currentRound++
+        // Reset drawing counts for the new round
+        for (let userId in drawings) {
+          drawings[userId] = 0
+        }
+        // Recursive call to select the next drawer in the new round
+        selectNextDrawer(roomId)
+      }
+    } else {
+      rooms[roomId].gameState.gameState = 'finished'
     }
 
     // If 'change' is specified, select a random drawer who hasn't drawn twice in the current round
-    const eligibleDrawers = Object.entries(drawings)
-      .filter(([userId, draws]) => draws < maxDrawingsPerRound)
-      .map(([userId]) => userId)
-
-    if (eligibleDrawers.length > 0) {
-      const randomIndex = Math.floor(Math.random() * eligibleDrawers.length)
-      gameState.drawer = eligibleDrawers[randomIndex]
-      drawings[gameState.drawer]++ // Increment draw count for the selected drawer
-    } else {
-      // If all users have drawn the max number of times in the current round, start a new round
-      gameState.currentRound++
-      // Reset drawing counts for the new round
-      for (let userId in drawings) {
-        drawings[userId] = 0
-      }
-      // Recursive call to select the next drawer in the new round
-      selectNextDrawer(roomId)
-    }
   }
 
   // Usage in the 'drawerchoosingword' socket event
   socket.on('drawerchoosingword', ({ roomId, id, type }: any) => {
     if (!rooms[roomId]) return
-
     if (type === 'change') {
+      rooms[roomId].gameState.gameState = 'choosing-word'
       selectNextDrawer(roomId) // Select the next drawer based on the above logic
     } else {
+      rooms[roomId].gameState.gameState = 'choosing-word'
       rooms[roomId].gameState.drawer = id
     }
-
-    rooms[roomId].gameState.gameState = 'choosing-word'
     getGameState(roomId)
   })
 
@@ -279,7 +283,7 @@ io.on('connection', socket => {
       rooms[roomId].gameState.drawer = id
       rooms[roomId].gameState.gameState = 'guessing-word'
 
-      rooms[roomId].gameState.lastGuesstime = Date.now() + 90000
+      rooms[roomId].gameState.lastGuesstime = Date.now() + 10000
       rooms[roomId].gameState.word = word
       getGameState(roomId)
       io.to(roomId).emit('wordselected', word)
@@ -308,7 +312,7 @@ io.on('connection', socket => {
   const updateScore = (roomId: string) => {
     const room = rooms[roomId]
     if (!room) return
-
+    socket.emit('clear-canvas', roomId)
     const { gameState } = room
     const { guessedWordUserState, drawer } = gameState
     const totalPlayers = Object.keys(guessedWordUserState || {}).length
