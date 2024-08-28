@@ -283,7 +283,7 @@ io.on('connection', socket => {
       rooms[roomId].gameState.drawer = id
       rooms[roomId].gameState.gameState = 'guessing-word'
 
-      rooms[roomId].gameState.lastGuesstime = Date.now() + 10000
+      rooms[roomId].gameState.lastGuesstime = Date.now() + 90000
       rooms[roomId].gameState.word = word
       getGameState(roomId)
       io.to(roomId).emit('wordselected', word)
