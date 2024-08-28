@@ -300,6 +300,14 @@ io.on('connection', socket => {
     }
   )
 
+  socket.on(
+    'set-words-indicator',
+    ({ roomId, exposedWords }: { roomId: string; exposedWords: number[] }) => {
+      if (!rooms[roomId]) return
+      io.to(roomId).emit('get-words-indicator', exposedWords)
+    }
+  )
+
   // socket.on(
   //   'update-scorecard',
   //   ({ roomId, score }: { roomId: string; score: Scoretype }) => {
