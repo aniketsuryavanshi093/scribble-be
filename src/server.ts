@@ -102,7 +102,8 @@ function joinRoom(
   socket: Socket,
   roomId: string,
   username: string,
-  Avatar: User['Avatar']
+  Avatar: User['Avatar'],
+  isAdmin: boolean
 ) {
   socket.join(roomId)
   const user = {
@@ -110,23 +111,12 @@ function joinRoom(
     username,
     Avatar,
     roomId,
+    isAdmin,
   }
 
   addUser(user, roomId)
   const members = getRoomMembers(roomId)
   socket.emit('room-joined', { user, roomId, members })
-  if (members.length === 3) {
-    rooms[roomId].gameState.gameState = 'started'
-    rooms[roomId].gameState.drawer = members[0].id
-    rooms[roomId].gameState.currentRound = 1
-    members.forEach(member => {
-      rooms[roomId].gameState.score[member.id] = {
-        score: 0,
-        worddrawoccurance: '',
-      }
-    })
-    io.to(roomId).emit('game-started', rooms[roomId].gameState)
-  }
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
     title: 'New member arrived!',
@@ -159,7 +149,7 @@ io.on('connection', socket => {
 
     if (!validatedData) return
     const { roomId, username } = validatedData
-    joinRoom(socket, roomId, username, joinRoomData.Avatar)
+    joinRoom(socket, roomId, username, joinRoomData.Avatar, true)
   })
 
   socket.on('join-room', (joinRoomData: JoinRoomData) => {
@@ -169,7 +159,7 @@ io.on('connection', socket => {
     const { roomId, username } = validatedData
 
     if (isRoomCreated(roomId)) {
-      return joinRoom(socket, roomId, username, joinRoomData.Avatar)
+      return joinRoom(socket, roomId, username, joinRoomData.Avatar, false)
     }
 
     socket.emit('room-not-found', {
@@ -299,6 +289,20 @@ io.on('connection', socket => {
       getGameState(roomId)
     }
   )
+
+  socket.on('start-game', ({ roomId }: { roomId: string }) => {
+    const members = getRoomMembers(roomId)
+    rooms[roomId].gameState.gameState = 'started'
+    rooms[roomId].gameState.drawer = members[0].id
+    rooms[roomId].gameState.currentRound = 1
+    members.forEach(member => {
+      rooms[roomId].gameState.score[member.id] = {
+        score: 0,
+        worddrawoccurance: '',
+      }
+    })
+    io.to(roomId).emit('game-started', rooms[roomId].gameState)
+  })
 
   socket.on(
     'set-words-indicator',
