@@ -12,6 +12,7 @@ export interface JoinRoomData {
 
 export interface User {
   id: string
+  isAdmin: boolean
   Avatar: Record<
     any,
     {
