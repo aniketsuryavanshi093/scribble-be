@@ -335,7 +335,7 @@ io.on('connection', socket => {
     let correctGuesses = 0
 
     for (const [userId, guessState] of Object.entries(guessedWordUserState || {})) {
-      if (guessState.isGuessed) {
+      if (guessState.isGuessed && !!gameState?.score[userId]?.score) {
         correctGuesses++
         const guessTime = guessState.guessedTime
         if (guessTime <= 30) {
