@@ -116,6 +116,10 @@ function joinRoom(
 
   addUser(user, roomId)
   const members = getRoomMembers(roomId)
+  rooms[roomId].gameState.score[user.id] = {
+    score: 0,
+    worddrawoccurance: '',
+  }
   socket.emit('room-joined', { user, roomId, members })
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
@@ -295,12 +299,12 @@ io.on('connection', socket => {
     rooms[roomId].gameState.gameState = 'started'
     rooms[roomId].gameState.drawer = members[0].id
     rooms[roomId].gameState.currentRound = 1
-    members.forEach(member => {
-      rooms[roomId].gameState.score[member.id] = {
-        score: 0,
-        worddrawoccurance: '',
-      }
-    })
+    // members.forEach(member => {
+    //   rooms[roomId].gameState.score[member.id] = {
+    //     score: 0,
+    //     worddrawoccurance: '',
+    //   }
+    // })
     io.to(roomId).emit('game-started', rooms[roomId].gameState)
   })
 
