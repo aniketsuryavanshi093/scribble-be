@@ -71,6 +71,8 @@ const removeUser = (userId: string, roomId?: string) => {
       ...rooms[roomId],
       user: rooms[roomId].user.filter(user => user.id !== userId),
     }
+    // @ts-ignore
+    rooms[roomId].gameState.score[userId] = undefined
   }
 }
 const app = express()
@@ -335,7 +337,7 @@ io.on('connection', socket => {
     let correctGuesses = 0
 
     for (const [userId, guessState] of Object.entries(guessedWordUserState || {})) {
-      if (guessState.isGuessed && !!gameState?.score[userId]?.score) {
+      if (guessState.isGuessed && !!gameState?.score[userId]) {
         correctGuesses++
         const guessTime = guessState.guessedTime
         if (guessTime <= 30) {
@@ -352,8 +354,6 @@ io.on('connection', socket => {
     if (correctGuesses / totalPlayers > 0.5) {
       gameState.score[drawer].score += 100
     }
-    console.log(gameState)
-
     // Emit the updated scorecard to the room
     // io.to(roomId).emit('updatedscorecard-fromserver', gameState)
     getGameState(roomId)
