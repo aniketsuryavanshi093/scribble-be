@@ -1,87 +1,51 @@
-import 'module-alias/register'
-
 import express from 'express'
 import { Server, type Socket } from 'socket.io'
 import http from 'http'
 import cors from 'cors'
 import { z } from 'zod'
+import { createAdapter } from '@socket.io/redis-adapter'
 
-import type { DrawOptions, GameStateType, JoinRoomData, Scoretype, User } from '@/types'
+import type { DrawOptions, JoinRoomData, User } from '@/types'
 import { joinRoomSchema } from '@/lib/validations/joinRoom'
 import { addUndoPoint, getLastUndoPoint, deleteLastUndoPoint } from '@/data/undoPoints'
+import { createRedisClient } from '@/lib/redis'
+import {
+  initializeRoom,
+  getRoom,
+  updateRoom,
+  addUserToRoom,
+  removeUserFromRoom,
+  getRoomMembers,
+  getUser,
+  deleteRoom,
+} from '@/data/gameState'
+import { initPlayerScore, incrementScore, getLeaderboard } from '@/data/leaderboard'
 
-const rooms: Record<string, { user: User[]; gameState: GameStateType }> = {}
-const initializeGame = (
-  user: User,
-  roomId: string,
-  totalRounds: number,
-  maxDrawingsPerRound: number
-) => {
-  rooms[roomId] = {
-    user: [user],
-    gameState: {
-      gameState: 'not-started',
-      drawer: '',
-      word: '',
-      score: {},
-      currentRound: 1,
-      drawings: {},
-      totalRounds,
-      maxDrawingsPerRound,
-    },
-  }
-  // Initialize drawing counts
-  // for (let userId in rooms[roomId].user) {
-  rooms[roomId].gameState.drawings[user?.id] = 1
-  // }
-}
-
-const getUser = (userId: string, roomId?: string) => {
-  if (roomId) {
-    const roomMembers = rooms[roomId!]
-    if (!roomMembers) return null
-    return roomMembers.user.find(user => user.id === userId)
-  } else {
-    for (const element of Object.values(rooms)) {
-      const user = element.user.find(user => user.id === userId)
-      if (user) {
-        return user
-      }
-    }
-    return null
-  }
-}
-const getRoomMembers = (roomId: string) => {
-  const roomMembers = rooms[roomId]?.user
-  if (!roomMembers) return []
-  return roomMembers
-}
-const addUser = (user: User, roomId: string) => {
-  if (!rooms[roomId]) {
-    return initializeGame(user, roomId, 2, 1)
-  }
-  rooms[roomId].gameState.drawings[user?.id] = 0
-  rooms[roomId].user.push(user)
-}
-
-const removeUser = (userId: string, roomId?: string) => {
-  if (roomId) {
-    if (!rooms[roomId]) return
-    rooms[roomId] = {
-      ...rooms[roomId],
-      user: rooms[roomId].user.filter(user => user.id !== userId),
-    }
-    // @ts-ignore
-    rooms[roomId].gameState.score[userId] = undefined
-  }
-}
 const app = express()
 
-app.use(cors())
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || '*' }))
 
 const server = http.createServer(app)
 
-const io = new Server(server)
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CLIENT_ORIGIN || '*',
+    methods: ['GET', 'POST'],
+  },
+})
+
+// Wire Redis adapter — routes all Socket.IO events (draw, game state, etc.) across
+// server instances transparently. io.sockets.adapter.rooms stays in sync across nodes,
+// so isRoomCreated() below continues to work correctly without any changes.
+const pubClient = createRedisClient()
+const subClient = createRedisClient()
+
+pubClient.on('connect', () => console.log('Redis pub client connected successfully'))
+subClient.on('connect', () => console.log('Redis sub client connected successfully'))
+pubClient.on('error', (err) => console.error('Redis pub client error:', err.message))
+subClient.on('error', (err) => console.error('Redis sub client error:', err.message))
+
+io.adapter(createAdapter(pubClient, subClient))
 
 function isRoomCreated(roomId: string) {
   const rooms = [...io.sockets.adapter.rooms]
@@ -100,7 +64,7 @@ function validateJoinRoomData(socket: Socket, joinRoomData: JoinRoomData) {
   }
 }
 
-function joinRoom(
+async function joinRoom(
   socket: Socket,
   roomId: string,
   username: string,
@@ -108,20 +72,18 @@ function joinRoom(
   isAdmin: boolean
 ) {
   socket.join(roomId)
-  const user = {
-    id: socket.id,
-    username,
-    Avatar,
-    roomId,
-    isAdmin,
-  }
+  const user: User = { id: socket.id, username, Avatar, roomId, isAdmin }
 
-  addUser(user, roomId)
-  const members = getRoomMembers(roomId)
-  rooms[roomId].gameState.score[user.id] = {
-    score: 0,
-    worddrawoccurance: '',
-  }
+  await addUserToRoom(user, roomId)
+
+  const room = await getRoom(roomId)
+  if (!room) return
+
+  room.gameState.score[user.id] = { score: 0, worddrawoccurance: '' }
+  await updateRoom(roomId, room)
+  await initPlayerScore(roomId, user.id)
+
+  const members = await getRoomMembers(roomId)
   socket.emit('room-joined', { user, roomId, members })
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
@@ -130,12 +92,14 @@ function joinRoom(
   })
 }
 
-function leaveRoom(socket: Socket, RoomId?: string) {
-  const user = getUser(socket.id, RoomId)
+async function leaveRoom(socket: Socket, RoomId?: string) {
+  const user = await getUser(socket.id, RoomId)
   if (!user) return
   const { username, roomId } = user
-  removeUser(socket.id, roomId)
-  const members = getRoomMembers(roomId)
+
+  await removeUserFromRoom(socket.id, roomId)
+
+  const members = await getRoomMembers(roomId)
 
   socket.to(roomId).emit('update-members', members)
   socket.to(roomId).emit('send-notification', {
@@ -143,24 +107,29 @@ function leaveRoom(socket: Socket, RoomId?: string) {
     message: `${username} left the party.`,
   })
   socket.leave(roomId)
+
+  // Clean up Redis when the last member leaves
+  if (members.length === 0) {
+    await deleteRoom(roomId)
+  }
 }
 
-function getGameState(roomId: string) {
-  io.to(roomId).emit('recievegamestate', rooms[roomId].gameState)
+async function getGameState(roomId: string) {
+  const room = await getRoom(roomId)
+  if (!room) return
+  io.to(roomId).emit('recievegamestate', room.gameState)
 }
 
 io.on('connection', socket => {
-  socket.on('create-room', (joinRoomData: JoinRoomData) => {
+  socket.on('create-room', async (joinRoomData: JoinRoomData) => {
     const validatedData = validateJoinRoomData(socket, joinRoomData)
-
     if (!validatedData) return
     const { roomId, username } = validatedData
-    joinRoom(socket, roomId, username, joinRoomData.Avatar, true)
+    await joinRoom(socket, roomId, username, joinRoomData.Avatar, true)
   })
 
-  socket.on('join-room', (joinRoomData: JoinRoomData) => {
+  socket.on('join-room', async (joinRoomData: JoinRoomData) => {
     const validatedData = validateJoinRoomData(socket, joinRoomData)
-
     if (!validatedData) return
     const { roomId, username } = validatedData
 
@@ -173,13 +142,11 @@ io.on('connection', socket => {
     })
   })
 
-  socket.on('client-ready', (roomId: string) => {
-    const members = getRoomMembers(roomId)
-    // Don't need to request the room's canvas state if a user is the first member
+  socket.on('client-ready', async (roomId: string) => {
+    const members = await getRoomMembers(roomId)
     if (members.length === 1) return socket.emit('client-loaded')
 
     const adminMember = members[0]
-
     if (!adminMember) return
 
     socket.to(adminMember.id).emit('get-canvas-state')
@@ -187,15 +154,17 @@ io.on('connection', socket => {
 
   socket.on(
     'send-canvas-state',
-    ({ canvasState, roomId }: { canvasState: string; roomId: string }) => {
-      const members = getRoomMembers(roomId)
+    async ({ canvasState, roomId }: { canvasState: string; roomId: string }) => {
+      const members = await getRoomMembers(roomId)
       const lastMember = members[members.length - 1]
-
       if (!lastMember) return
+
+      const room = await getRoom(roomId)
+      if (!room) return
 
       socket.to(lastMember.id).emit('canvas-state-from-server', {
         canvasState,
-        gameState: rooms[roomId].gameState,
+        gameState: room.gameState,
       })
     }
   )
@@ -206,6 +175,7 @@ io.on('connection', socket => {
       socket.to(roomId).emit('update-canvas-state', drawOptions)
     }
   )
+
   socket.on(
     'broadcast-mesage',
     ({
@@ -219,16 +189,14 @@ io.on('connection', socket => {
       userid: string
       username: string
     }) => {
-      io.to(roomId).emit('recieve-broadcasted-message', {
-        message,
-        userid,
-        username,
-      })
+      io.to(roomId).emit('recieve-broadcasted-message', { message, userid, username })
     }
   )
-  const selectNextDrawer = (roomId: string) => {
-    const room = rooms[roomId]
+
+  const selectNextDrawer = async (roomId: string) => {
+    const room = await getRoom(roomId)
     if (!room) return
+
     room.gameState.guessedWordUserState = {}
     const { gameState } = room
     const { currentRound, drawings, totalRounds, maxDrawingsPerRound } = gameState
@@ -237,100 +205,93 @@ io.on('connection', socket => {
       console.log('inside here ', currentRound, totalRounds)
 
       const eligibleDrawers = Object.entries(drawings)
-        .filter(([userId, draws]) => draws < maxDrawingsPerRound)
+        .filter(([, draws]) => draws < maxDrawingsPerRound)
         .map(([userId]) => userId)
 
       if (eligibleDrawers.length > 0) {
         const randomIndex = Math.floor(Math.random() * eligibleDrawers.length)
         gameState.drawer = eligibleDrawers[randomIndex]
-        drawings[gameState.drawer]++ // Increment draw count for the selected drawer
+        drawings[gameState.drawer]++
       } else {
-        // If all users have drawn the max number of times in the current round, start a new round
         gameState.currentRound++
-        // Reset drawing counts for the new round
-        for (let userId in drawings) {
+        for (const userId in drawings) {
           drawings[userId] = 0
         }
-        // Recursive call to select the next drawer in the new round
-        selectNextDrawer(roomId)
+        await updateRoom(roomId, room)
+        return selectNextDrawer(roomId)
       }
     } else {
-      rooms[roomId].gameState.gameState = 'finished'
+      room.gameState.gameState = 'finished'
     }
 
-    // If 'change' is specified, select a random drawer who hasn't drawn twice in the current round
+    await updateRoom(roomId, room)
   }
 
-  // Usage in the 'drawerchoosingword' socket event
-  socket.on('drawerchoosingword', ({ roomId, id, type }: any) => {
-    if (!rooms[roomId]) return
+  socket.on('drawerchoosingword', async ({ roomId, id, type }: any) => {
+    const room = await getRoom(roomId)
+    if (!room) return
+
     if (type === 'change') {
-      rooms[roomId].gameState.gameState = 'choosing-word'
-      selectNextDrawer(roomId) // Select the next drawer based on the above logic
+      room.gameState.gameState = 'choosing-word'
+      await updateRoom(roomId, room)
+      await selectNextDrawer(roomId)
     } else {
-      rooms[roomId].gameState.gameState = 'choosing-word'
-      rooms[roomId].gameState.drawer = id
+      room.gameState.gameState = 'choosing-word'
+      room.gameState.drawer = id
+      await updateRoom(roomId, room)
     }
-    getGameState(roomId)
+    await getGameState(roomId)
   })
 
-  socket.on('selectword', ({ roomId, id, word }: any) => {
-    if (rooms[roomId]) {
-      rooms[roomId].gameState.drawer = id
-      rooms[roomId].gameState.gameState = 'guessing-word'
+  socket.on('selectword', async ({ roomId, id, word }: any) => {
+    const room = await getRoom(roomId)
+    if (!room) return
 
-      rooms[roomId].gameState.lastGuesstime = Date.now() + 90000
-      rooms[roomId].gameState.word = word
-      getGameState(roomId)
-      io.to(roomId).emit('wordselected', word)
-    }
+    room.gameState.drawer = id
+    room.gameState.gameState = 'guessing-word'
+    room.gameState.lastGuesstime = Date.now() + 90000
+    room.gameState.word = word
+    await updateRoom(roomId, room)
+    await getGameState(roomId)
+    io.to(roomId).emit('wordselected', word)
   })
 
   socket.on(
     'change-drawer',
-    ({ roomId, newdrawer }: { roomId: string; newdrawer: string }) => {
-      if (!rooms[roomId]) return
-      rooms[roomId].gameState.drawer = newdrawer
-      // io.to(roomId).emit('drawer-changed-fromserver', rooms[roomId].gameState)
-      getGameState(roomId)
+    async ({ roomId, newdrawer }: { roomId: string; newdrawer: string }) => {
+      const room = await getRoom(roomId)
+      if (!room) return
+
+      room.gameState.drawer = newdrawer
+      await updateRoom(roomId, room)
+      await getGameState(roomId)
     }
   )
 
-  socket.on('start-game', ({ roomId }: { roomId: string }) => {
-    const members = getRoomMembers(roomId)
-    rooms[roomId].gameState.gameState = 'started'
-    rooms[roomId].gameState.drawer = members[0].id
-    rooms[roomId].gameState.currentRound = 1
-    // members.forEach(member => {
-    //   rooms[roomId].gameState.score[member.id] = {
-    //     score: 0,
-    //     worddrawoccurance: '',
-    //   }
-    // })
-    io.to(roomId).emit('game-started', rooms[roomId].gameState)
+  socket.on('start-game', async ({ roomId }: { roomId: string }) => {
+    const members = await getRoomMembers(roomId)
+    const room = await getRoom(roomId)
+    if (!room) return
+
+    room.gameState.gameState = 'started'
+    room.gameState.drawer = members[0].id
+    room.gameState.currentRound = 1
+    await updateRoom(roomId, room)
+    io.to(roomId).emit('game-started', room.gameState)
   })
 
   socket.on(
     'set-words-indicator',
     ({ roomId, exposedWords }: { roomId: string; exposedWords: number[] }) => {
-      if (!rooms[roomId]) return
       io.to(roomId).emit('get-words-indicator', exposedWords)
     }
   )
 
-  // socket.on(
-  //   'update-scorecard',
-  //   ({ roomId, score }: { roomId: string; score: Scoretype }) => {
-  //     if (!rooms[roomId]) return
-  //     rooms[roomId].gameState.score = score
-  //     // io.to(roomId).emit('updatedscorecard-fromserver', rooms[roomId].gameState)
-  //     getGameState(roomId)
-  //   }
-  // )
-  const updateScore = (roomId: string) => {
-    const room = rooms[roomId]
+  const updateScore = async (roomId: string) => {
+    const room = await getRoom(roomId)
     if (!room) return
-    socket.emit('clear-canvas', roomId)
+
+    io.to(roomId).emit('clear-canvas')
     const { gameState } = room
     const { guessedWordUserState, drawer } = gameState
     const totalPlayers = Object.keys(guessedWordUserState || {}).length
@@ -340,44 +301,68 @@ io.on('connection', socket => {
       if (guessState.isGuessed && !!gameState?.score[userId]) {
         correctGuesses++
         const guessTime = guessState.guessedTime
+        let points = 0
         if (guessTime <= 30) {
-          gameState.score[userId].score += 175
+          points = 175
         } else if (guessTime <= 60) {
-          gameState.score[userId].score += 125
+          points = 125
         } else {
-          gameState.score[userId].score += 75
+          points = 75
         }
+        // Update Sorted Set (ranking source of truth) and mirror new total into room JSON
+        const newScore = await incrementScore(roomId, userId, points)
+        gameState.score[userId].score = newScore
       }
     }
 
     // Bonus for the drawer if more than 50% guessed correctly
     if (correctGuesses / totalPlayers > 0.5) {
-      gameState.score[drawer].score += 100
+      const newDrawerScore = await incrementScore(roomId, drawer, 100)
+      if (gameState.score[drawer]) {
+        gameState.score[drawer].score = newDrawerScore
+      }
     }
-    // Emit the updated scorecard to the room
-    // io.to(roomId).emit('updatedscorecard-fromserver', gameState)
-    getGameState(roomId)
+
+    await updateRoom(roomId, room)
+    await getGameState(roomId)
   }
 
-  // Usage in the 'update-scorecard' socket event
-  socket.on('update-scorecard', ({ roomId }: { roomId: string }) => {
-    if (!rooms[roomId]) return
-    // rooms[roomId].gameState.score = score
-    updateScore(roomId) // Call the function to update the scores
+  socket.on('update-scorecard', async ({ roomId }: { roomId: string }) => {
+    const room = await getRoom(roomId)
+    if (!room) return
+    await updateScore(roomId)
   })
 
-  socket.on('guessed-word', ({ userId, roomId, guessedTime }: any) => {
-    if (!rooms[roomId]) return
-    if (rooms[roomId]) {
-      rooms[roomId].gameState.guessedWordUserState = {
-        ...rooms[roomId].gameState.guessedWordUserState,
-        [userId]: {
-          isGuessed: true,
-          guessedTime,
-        },
-      }
-      getGameState(roomId)
+  socket.on('guessed-word', async ({ userId, roomId, guessedTime }: any) => {
+    const room = await getRoom(roomId)
+    if (!room) return
+
+    room.gameState.guessedWordUserState = {
+      ...room.gameState.guessedWordUserState,
+      [userId]: { isGuessed: true, guessedTime },
     }
+    await updateRoom(roomId, room)
+    await getGameState(roomId)
+
+    // Check if all non-drawer players have guessed — if so, end the round early
+    const { drawer, guessedWordUserState } = room.gameState
+    const nonDrawers = room.user.filter(u => u.id !== drawer)
+    const allGuessed =
+      nonDrawers.length > 0 &&
+      nonDrawers.every(u => guessedWordUserState?.[u.id]?.isGuessed)
+
+    if (allGuessed) {
+      // Force the timer to expire immediately for all clients
+      room.gameState.lastGuesstime = Date.now()
+      await updateRoom(roomId, room)
+      await updateScore(roomId)
+    }
+  })
+
+  // Returns the room leaderboard sorted by score descending — used for end-of-round ranked display
+  socket.on('get-leaderboard', async (roomId: string) => {
+    const leaderboard = await getLeaderboard(roomId)
+    socket.emit('leaderboard-from-server', leaderboard)
   })
 
   socket.on('clear-canvas', (roomId: string) => {
@@ -391,29 +376,29 @@ io.on('connection', socket => {
     }
   )
 
-  socket.on('get-last-undo-point', (roomId: string) => {
-    const lastUndoPoint = getLastUndoPoint(roomId)
+  socket.on('get-last-undo-point', async (roomId: string) => {
+    const lastUndoPoint = await getLastUndoPoint(roomId)
     socket.emit('last-undo-point-from-server', lastUndoPoint)
   })
 
   socket.on(
     'add-undo-point',
-    ({ roomId, undoPoint }: { roomId: string; undoPoint: string }) => {
-      addUndoPoint(roomId, undoPoint)
+    async ({ roomId, undoPoint }: { roomId: string; undoPoint: string }) => {
+      await addUndoPoint(roomId, undoPoint)
     }
   )
 
-  socket.on('delete-last-undo-point', (roomId: string) => {
-    deleteLastUndoPoint(roomId)
+  socket.on('delete-last-undo-point', async (roomId: string) => {
+    await deleteLastUndoPoint(roomId)
   })
 
-  socket.on('leave-room', (roomId: string) => {
-    leaveRoom(socket, roomId)
+  socket.on('leave-room', async (roomId: string) => {
+    await leaveRoom(socket, roomId)
   })
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     socket.emit('disconnected')
-    leaveRoom(socket)
+    await leaveRoom(socket)
   })
 })
 

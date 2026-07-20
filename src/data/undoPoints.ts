@@ -1,23 +1,19 @@
-const undoPoints: Record<string, string[]> = {}
+import { redis } from '@/lib/redis'
 
-const addUndoPoint = (roomId: string, undoPoint: string) => {
-  const room = undoPoints[roomId]
-  if (room) {
-    return room.push(undoPoint)
-  }
-  undoPoints[roomId] = [undoPoint]
+function undoKey(roomId: string) {
+  return `scribble:undo:${roomId}`
 }
 
-const getLastUndoPoint = (roomId: string) => {
-  const roomUndoPoints = undoPoints[roomId]
-  if (!roomUndoPoints) return
-  return roomUndoPoints[roomUndoPoints.length - 1]
+export async function addUndoPoint(roomId: string, undoPoint: string): Promise<void> {
+  await redis.rpush(undoKey(roomId), undoPoint)
+  await redis.expire(undoKey(roomId), 7200)
 }
 
-const deleteLastUndoPoint = (roomId: string) => {
-  const room = undoPoints[roomId]
-  if (!room) return
-  undoPoints[roomId].pop()
+export async function getLastUndoPoint(roomId: string): Promise<string | null> {
+  const results = await redis.lrange(undoKey(roomId), -1, -1)
+  return results[0] ?? null
 }
 
-export { addUndoPoint, getLastUndoPoint, deleteLastUndoPoint }
+export async function deleteLastUndoPoint(roomId: string): Promise<void> {
+  await redis.rpop(undoKey(roomId))
+}
