@@ -26,7 +26,8 @@ export async function initializeRoom(
   user: User,
   roomId: string,
   totalRounds: number,
-  maxDrawingsPerRound: number
+  maxDrawingsPerRound: number,
+  timePerDraw: number = 90
 ): Promise<void> {
   const room: Room = {
     user: [user],
@@ -39,6 +40,7 @@ export async function initializeRoom(
       drawings: { [user.id]: 1 },
       totalRounds,
       maxDrawingsPerRound,
+      timePerDraw,
     },
   }
   await redis.set(roomKey(roomId), JSON.stringify(room))
@@ -48,7 +50,7 @@ export async function initializeRoom(
 export async function addUserToRoom(user: User, roomId: string): Promise<void> {
   const room = await getRoom(roomId)
   if (!room) {
-    return initializeRoom(user, roomId, 2, 1)
+    return initializeRoom(user, roomId, 2, 1, 90)
   }
   room.gameState.drawings[user.id] = 0
   room.user.push(user)
