@@ -1,0 +1,29 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║              PRODUCTION — RENDER ONLY                   ║
+# ║  This file is used by Render to deploy the service.     ║
+# ║  Render detects it automatically from the repo root.    ║
+# ║  DO NOT use this file for local development.            ║
+# ╚══════════════════════════════════════════════════════════╝
+# Docs: https://render.com/docs/infrastructure-as-code
+
+services:
+  - name: scribble-be
+    type: web
+    runtime: docker             # Render builds & runs the Dockerfile
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: oregon              # options: oregon | frankfurt | singapore | ohio
+    plan: free                  # options: free | starter | standard | pro
+    healthCheckPath: /          # update if you add a dedicated health-check route
+
+    # ── Environment variables ──────────────────────────────────────────
+    # NOTE: PORT is injected automatically by Render — never set it here.
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: REDIS_URL
+        value: redis://127.0.0.1:6379   # Redis runs inside the same container
+
+      - key: CLIENT_ORIGIN
+        value: https://scribble-fe.vercel.app  # ← replace with your real frontend URL

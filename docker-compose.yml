@@ -1,0 +1,25 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║              LOCAL DEVELOPMENT ONLY                     ║
+# ║  Use this file to run the app on your machine.          ║
+# ║  Command: docker compose up --build                     ║
+# ║  DO NOT use this file for Render / production.          ║
+# ╚══════════════════════════════════════════════════════════╝
+
+services:
+  scribble-be:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scribble-be
+    restart: unless-stopped
+    ports:
+      - "3001:3001"         # localhost:3001 → container:3001
+    environment:
+      PORT: 3001
+      REDIS_URL: redis://127.0.0.1:6379   # Redis runs inside the same container
+      CLIENT_ORIGIN: http://localhost:3000 # local frontend dev server
+      NODE_ENV: development
+    # If a .env file exists it overrides the values above
+    env_file:
+      - path: .env
+        required: false

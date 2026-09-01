@@ -1,0 +1,23 @@
+# VCS
+.git
+.gitignore
+
+# Dependencies (reinstalled inside the image)
+node_modules
+
+# TypeScript output (rebuilt inside the image)
+build
+
+# Local env overrides
+.env
+.env.*
+!.env.example
+
+# Render / Docker config (not needed inside the image)
+render.yaml
+docker-compose.yml
+
+# Editor / OS artefacts
+.DS_Store
+*.pem
+.vscode
