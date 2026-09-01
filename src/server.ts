@@ -69,12 +69,18 @@ async function joinRoom(
   roomId: string,
   username: string,
   Avatar: User['Avatar'],
-  isAdmin: boolean
+  isAdmin: boolean,
+  timePerDraw: number = 90,
+  roundCount: number = 2
 ) {
   socket.join(roomId)
   const user: User = { id: socket.id, username, Avatar, roomId, isAdmin }
 
-  await addUserToRoom(user, roomId)
+  if (isAdmin) {
+    await initializeRoom(user, roomId, roundCount, 1, timePerDraw)
+  } else {
+    await addUserToRoom(user, roomId)
+  }
 
   const room = await getRoom(roomId)
   if (!room) return
@@ -125,7 +131,9 @@ io.on('connection', socket => {
     const validatedData = validateJoinRoomData(socket, joinRoomData)
     if (!validatedData) return
     const { roomId, username } = validatedData
-    await joinRoom(socket, roomId, username, joinRoomData.Avatar, true)
+    const timePerDraw = joinRoomData.timePerDraw ?? 90
+    const roundCount = joinRoomData.roundCount ?? 2
+    await joinRoom(socket, roomId, username, joinRoomData.Avatar, true, timePerDraw, roundCount)
   })
 
   socket.on('join-room', async (joinRoomData: JoinRoomData) => {
@@ -247,9 +255,10 @@ io.on('connection', socket => {
     const room = await getRoom(roomId)
     if (!room) return
 
+    const timePerDrawMs = (room.gameState.timePerDraw ?? 90) * 1000
     room.gameState.drawer = id
     room.gameState.gameState = 'guessing-word'
-    room.gameState.lastGuesstime = Date.now() + 90000
+    room.gameState.lastGuesstime = Date.now() + timePerDrawMs
     room.gameState.word = word
     await updateRoom(roomId, room)
     await getGameState(roomId)

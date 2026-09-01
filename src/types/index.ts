@@ -8,6 +8,8 @@ export interface JoinRoomData {
       y: number
     }
   >
+  timePerDraw?: number
+  roundCount?: number
 }
 
 export interface User {
@@ -40,6 +42,7 @@ export interface GameStateType {
   drawings: Record<string, number> // Track how many times each user has drawn
   totalRounds: number // Total number of rounds in the game
   maxDrawingsPerRound: number // Max drawings per round per user
+  timePerDraw: number // Seconds each player has to draw
 }
 
 export type Scoretype = Record<
